@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: dark; }
+  body {
+    width: 240px; margin: 0; padding: 14px;
+    background: #1C1E21; color: #E5E7EB;
+    font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px;
+  }
+  .title {
+    color: #E8714A; font-weight: 600; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .title img { width: 18px; height: 18px; border-radius: 4px; flex-shrink: 0; }
+  .row { display: flex; justify-content: space-between; margin: 4px 0; }
+  .dim { color: #6B7280; }
+  .ok { color: #10B981; }
+  .warn { color: #F59E0B; }
+  #msg { margin: 8px 0; line-height: 1.4; }
+  button {
+    width: 100%; margin-top: 10px; padding: 7px;
+    background: #E8714A; color: #111; border: 0; border-radius: 4px;
+    font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: 0.6; cursor: default; }
+</style>
+</head>
+<body>
+  <div class="title"><img src="icons/icon32.png" alt="icon"><span>Claude Usage Widget</span></div>
+  <div id="msg" class="dim">Loading…</div>
+  <div id="stats"></div>
+  <button id="refresh">Refresh now</button>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

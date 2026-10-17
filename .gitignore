@@ -1,0 +1,13 @@
+# personal usage data and logs
+usage_data.json
+fetch.log
+
+# local tooling
+.claude/
+__pycache__/
+*.pyc
+
+# build output (build_installer.bat)
+build/
+installer/
+*.spec
