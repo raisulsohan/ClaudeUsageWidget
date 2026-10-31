@@ -48,8 +48,7 @@ export async function fetchAndPost() {
     }
     if (!post.ok) { setStatus({ ok: false, error: "Receiver error (HTTP " + post.status + ")" }); return; }
 
-    setStatus({ ok: true, session: pct(usage, "session", "five_hour"),
-                weekly: pct(usage, "weekly_all", "seven_day") });
+    setStatus({ ok: true, weekly: pct(usage, "weekly_all", "seven_day") });
     console.log("[widget] pushed usage to the desktop widget");
   } catch (e) {
     setStatus({ ok: false, error: e.message });

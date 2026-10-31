@@ -49,8 +49,7 @@ class Handler(BaseHTTPRequestHandler):
             data = fetch_usage.parse(body.get("usage") or {}, body.get("org") or {})
             DATA_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
             ts = datetime.now().strftime("%H:%M:%S")
-            print(f"[{ts}] session={data['session']['percent']}%  "
-                  f"weekly={data['weekly']['percent']}%  "
+            print(f"[{ts}] weekly={data['weekly']['percent']}%  "
                   f"fable={data['fable']['percent']}%  "
                   f"extra=${data['extra']['spent']:.2f}")
             self.send_response(200); self._cors()

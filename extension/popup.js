@@ -28,7 +28,6 @@ function render(status) {
       d.innerHTML = '<span class="dim">' + label + "</span><span>" + v + "% used</span>";
       stats.appendChild(d);
     };
-    add("Session", status.session);
     add("Weekly", status.weekly);
   } else {
     msg.className = "warn";

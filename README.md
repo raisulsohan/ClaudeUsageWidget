@@ -2,12 +2,11 @@
 
 A Windows desktop widget that shows your [claude.ai](https://claude.ai) plan limits at a glance, so you see a limit coming before you hit it.
 
-- **Session**: the rolling 5-hour limit
 - **Weekly**: the 7-day limit across all models
 - **Fable**: the separate weekly Fable limit (shown only if your plan has one)
 - **Extra usage**: credits spent against your monthly cap
 
-Bars turn **amber at 75%** and **red at 90%**. A pixel-art mascot reacts to your session usage: calm when you're idle, sweating at 75%, panicking at 90%, asleep once you hit the limit.
+Bars turn **amber at 75%** and **red at 90%**. A pixel-art mascot reacts to your weekly usage: calm when you're idle, sweating at 75%, panicking at 90%, asleep once you hit the limit.
 
 > **Unofficial.** Not affiliated with Anthropic. It reads the same internal endpoint the claude.ai settings page uses, which can change without notice.
 
@@ -161,9 +160,9 @@ Either way, another user account on the PC can't read it.
 
 ## The mascot
 
-The pixel robot's mood follows your **session** usage:
+The pixel robot's mood follows your **weekly** usage:
 
-| Session | Mood |
+| Weekly | Mood |
 |---|---|
 | under 25% | idle — slow breathing, blinking |
 | 25–74% | working — walks in place |
@@ -194,7 +193,6 @@ The widget reads this file:
 ```json
 {
   "plan": "Max",
-  "session": { "percent": 55, "resets_in": "1h 18m" },
   "weekly":  { "percent": 54, "resets_in": "2d 7h" },
   "fable":   { "percent": 92, "resets_in": "7h", "available": true },
   "extra":   { "enabled": true, "spent": 0.0, "percent": 0, "limit": 12.0, "resets": "1st of month" },

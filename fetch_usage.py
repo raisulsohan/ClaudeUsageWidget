@@ -80,6 +80,9 @@ def secs_to_hm(iso: str | None) -> str:
 
 def plan_name(org: dict) -> str:
     caps = org.get("capabilities") or []
+    # the API reports this plan as claude_max with the 20x tier
+    if "claude_ultra" in caps or org.get("rate_limit_tier") == "default_claude_max_20x":
+        return "Ultra"
     if "claude_max" in caps: return "Max"
     if "claude_pro" in caps: return "Pro"
     return "Free"
@@ -99,7 +102,7 @@ def find_limit(limits: list, kind: str, model: str | None = None) -> dict | None
     return None
 
 def window(lim: dict | None, legacy: dict | None = None) -> dict:
-    """Prefer the `limits` entry; fall back to the legacy five_hour/seven_day block."""
+    """Prefer the `limits` entry; fall back to the legacy seven_day block."""
     if lim:
         pct, resets = lim.get("percent"), lim.get("resets_at")
     else:
@@ -114,7 +117,6 @@ def parse(raw: dict, org: dict) -> dict:
     ex     = raw.get("extra_usage") or {}
     return {
         "plan":    plan_name(org),
-        "session": window(find_limit(limits, "session"),    raw.get("five_hour")),
         "weekly":  window(find_limit(limits, "weekly_all"), raw.get("seven_day")),
         "fable":   {**window(fable), "available": fable is not None},
         "extra": {
@@ -224,7 +226,7 @@ def setup():
 
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-    print(f"  session={data['session']['percent']}%  weekly={data['weekly']['percent']}%")
+    print(f"  weekly={data['weekly']['percent']}%")
     print(f"Setup complete. Saved to {credential_store.where()}.")
 
 # ── Entry points ──────────────────────────────────────────────────────────────
@@ -235,8 +237,7 @@ def run_once(verbose=True):
         json.dump(data, f, indent=2)
     if verbose:
         ts = datetime.now().strftime("%H:%M:%S")
-        log(f"[{ts}] session={data['session']['percent']}%  "
-            f"weekly={data['weekly']['percent']}%  "
+        log(f"[{ts}] weekly={data['weekly']['percent']}%  "
             f"fable={data['fable']['percent']}%  "
             f"extra=${data['extra']['spent']:.2f}")
 

@@ -12,7 +12,7 @@ Two layouts (set LAYOUT below):
 
 Reads usage_data.json written by fetch_usage.py or receiver.py, and picks up new
 data on its own (watches the file's modification time). The pixel mascot's mood
-follows your session usage.
+follows your weekly usage.
 """
 
 import ctypes
@@ -57,12 +57,12 @@ FONT = "Consolas"            # ships with Windows; monospace
 ANIM_MS = 220               # mascot animation tick
 
 # vertical layout geometry
-V_W, V_H = 440, 520
+V_W, V_H = 440, 458
 MASCOT_TOP = 44
 # horizontal layout geometry
-H_W, H_H = 860, 60
+H_W, H_H = 677, 60
 # compact (on-taskbar) geometry
-COMPACT_W = 480
+COMPACT_W = 382
 COMPACT_H = 44
 TRAY_MARGIN = 300   # px kept clear on the right for the clock / system tray
 EDGE_MARGIN = 8     # px kept clear on the left
@@ -76,7 +76,6 @@ def load_data():
         except Exception:
             pass
     return {
-        "session": {"percent": 0, "resets_in": "—"},
         "weekly":  {"percent": 0, "resets_in": "—"},
         "fable":   {"percent": 0, "resets_in": "—", "available": False},
         "extra":   {"spent": 0.0, "percent": 0, "limit": 20.0, "resets": "—", "enabled": False},
@@ -311,7 +310,7 @@ class UsageWidget:
     def _draw_mascot(self, cx, cy, scale):
         cv = self.canvas
         cv.delete("bot")
-        pct = self.data.get("session", {}).get("percent", 0) or 0
+        pct = self.data.get("weekly", {}).get("percent", 0) or 0
         name, _, _ = mood_for(pct)
         f = self._frame
 
@@ -385,7 +384,6 @@ class UsageWidget:
         fable = d.get("fable") or {}
         extra = d.get("extra") or {}
         cols = [
-            ("SESSION", d["session"]["percent"], f"↻ {d['session']['resets_in']}"),
             ("WEEKLY",  d["weekly"]["percent"],  f"↻ {d['weekly']['resets_in']}"),
             ("FABLE",   fable.get("percent", 0),
              f"↻ {fable.get('resets_in', '—')}" if fable.get("available") else "no limit"),
@@ -426,7 +424,6 @@ class UsageWidget:
         fable = d.get("fable") or {}
         extra = d.get("extra") or {}
         cols = [
-            ("SESSION", d["session"]["percent"], f"resets {d['session']['resets_in']}"),
             ("WEEKLY",  d["weekly"]["percent"],  f"resets {d['weekly']['resets_in']}"),
             ("FABLE",   fable.get("percent", 0),
              f"resets {fable.get('resets_in', '—')}" if fable.get("available") else "no limit"),
@@ -467,7 +464,7 @@ class UsageWidget:
         cx, cy, scale = W // 2, MASCOT_TOP + 32, 6
         self._mascot_pos = (cx, cy, scale)
         self._draw_mascot(cx, cy, scale)
-        name, label, color = mood_for(d.get("session", {}).get("percent", 0) or 0)
+        name, label, color = mood_for(d.get("weekly", {}).get("percent", 0) or 0)
         self._text(W // 2, MASCOT_TOP + 78, label, color=color, size=9, anchor="center")
 
         y = MASCOT_TOP + 96
@@ -484,7 +481,6 @@ class UsageWidget:
             y += 18
             cv.create_line(pad, y, W - pad, y, fill=C["separator"], width=1); y += 12
 
-        section("SESSION", d["session"]["percent"], f"Resets in {d['session']['resets_in']}")
         section("WEEKLY",  d["weekly"]["percent"],  f"Resets in {d['weekly']['resets_in']}")
         fable = d.get("fable") or {}
         fsub = (f"Weekly  ·  Resets in {fable.get('resets_in', '—')}"

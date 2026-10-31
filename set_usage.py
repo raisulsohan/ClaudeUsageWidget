@@ -40,16 +40,10 @@ try:
 except Exception:
     existing = {}
 
-s = existing.get("session", {})
 w = existing.get("weekly", {})
 f = existing.get("fable", {})
 e = existing.get("extra", {})
 
-print("SESSION")
-sess_pct    = ask("percent used (0-100)",  s.get("percent", 0))
-sess_resets = ask_str("resets in",         s.get("resets_in", "3h 55m"))
-
-print()
 print("WEEKLY")
 week_pct    = ask("percent used (0-100)",  w.get("percent", 0))
 week_resets = ask_str("resets in",         w.get("resets_in", "13h 55m"))
@@ -72,7 +66,6 @@ plan = ask_str("Plan (Pro/Max/etc.)", existing.get("plan", "Pro"))
 
 data = {
     "plan": plan,
-    "session": {"percent": sess_pct,  "resets_in": sess_resets},
     "weekly":  {"percent": week_pct,  "resets_in": week_resets},
     "fable":   {"percent": fable_pct, "resets_in": fable_resets, "available": True},
     "extra": {
