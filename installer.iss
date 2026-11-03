@@ -57,7 +57,7 @@ Type: files; Name: "{app}\usage_data.json"
 Type: files; Name: "{app}\fetch.log"
 
 [Messages]
-FinishedLabel=Setup has installed [name] on your computer.%n%nOne-time step: open chrome://extensions (or edge://extensions), turn on Developer mode, click "Load unpacked" and select the "extension" folder in the install folder. The Start Menu has a shortcut to it.%n%nDrag the widget to move it, double-click to refresh, right-click to quit.
+FinishedLabel=Setup has installed [name] on your computer.%n%nOne-time step: open chrome://extensions (or edge://extensions), turn on Developer mode, click "Load unpacked" and select the "extension" folder in the install folder. The Start Menu has a shortcut to it.%n%nClick the strip on the taskbar to open the panel (Refresh and Quit are there). Drag the strip to move it.
 
 [Code]
 // Stop a running copy before files are replaced (upgrade / reinstall).

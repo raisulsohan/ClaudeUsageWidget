@@ -72,11 +72,11 @@ Saved key (Credential Manager/DPAPI) ─┘
 
 ## Install with the setup file (no Python needed)
 
-`installer\ClaudeUsageWidget-Setup.exe` installs the widget for your Windows user (no admin prompt) to `%LOCALAPPDATA%\Programs\Claude Usage Widget`. It is the extension method in one program: the receiver and the widget run together in `ClaudeUsageWidget.exe`.
+There is no ready-made download: build the setup file first (see **Build the setup file yourself** below), which makes `installer\ClaudeUsageWidget-Setup.exe`. It installs the widget for your Windows user (no admin prompt) to `%LOCALAPPDATA%\Programs\Claude Usage Widget`. It is the extension method in one program: the receiver and the widget run together in `ClaudeUsageWidget.exe`.
 
 1. Run `ClaudeUsageWidget-Setup.exe`. Keep **Start the widget when I sign in to Windows** ticked if you want it at logon.
 2. Load the extension once: open `chrome://extensions` (or `edge://extensions`), turn on **Developer mode**, click **Load unpacked**, and select the `extension` folder in the install folder. The Start Menu has a **Chrome extension folder** shortcut to it.
-3. Start **Claude Usage Widget** from the Start Menu. Right-click the widget to quit; that also stops the receiver.
+3. Start **Claude Usage Widget** from the Start Menu. To quit, click the strip and then **Quit** in the panel; that also stops the receiver.
 
 Uninstall from **Settings → Apps → Installed apps**.
 
@@ -99,7 +99,7 @@ Once the one-time setup is done (Python, `pip install`, and the extension loaded
 | File | What it does |
 |---|---|
 | **`Start Widget.cmd`** | Starts `receiver.py` and `widget.py` in the background. A small window shows for a few seconds, then closes. Safe to double-click again: it skips whatever is already running. |
-| **`Stop Widget.cmd`** | Stops both. (Right-clicking the widget closes just the widget.) |
+| **`Stop Widget.cmd`** | Stops both. (**Quit** in the widget's panel closes just the widget.) |
 
 **Start at logon:** press **Win+R**, type `shell:startup`, Enter. In the folder that opens, right-click → **New → Shortcut**, point it at `Start Widget.cmd`, then open the shortcut's **Properties** and set **Run** to **Minimized** so no window flashes at sign-in.
 

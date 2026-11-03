@@ -35,6 +35,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo Done. Right-click the widget to close it; run "Stop Widget.cmd" to stop everything.
+echo Done. Click the widget, then Quit, to close it; run "Stop Widget.cmd" to stop everything.
 timeout /t 3 >nul
 endlocal
