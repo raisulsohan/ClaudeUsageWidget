@@ -13,11 +13,13 @@ data on its own (watches the file's modification time).
 """
 
 import ctypes
+import functools
 import json
 import os
 import re
 import sys
 import threading
+import time
 import tkinter as tk
 import tkinter.font as tkfont
 import urllib.request
@@ -35,6 +37,8 @@ DATA_FILE = APP_DIR / "usage_data.json"
 # remembers where you last dragged the strip
 POS_FILE = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "claude-usage-widget" / "widget_pos.json"
 POS_KEY = "compact"
+# weekly % snapshots, one per data update, for the "by day" chart (last 35 days)
+HISTORY_FILE = POS_FILE.parent / "history.json"
 
 USAGE_PAGE = "https://claude.ai/settings/limits"
 RECEIVER_REFRESH = "http://127.0.0.1:8765/refresh"
@@ -48,7 +52,12 @@ STALE_MIN = 30       # "Updated …" turns amber when the data is older than thi
 TICK_MS = 1000
 
 WEEK = timedelta(days=7)
+DAY = timedelta(days=1)
+EVEN_DAY = 100 / 7   # % of the weekly limit per day at an even pace
 SS = 4               # supersampling for the anti-aliased shapes
+OPEN_MS = 420        # panel open: slide up, fade in, bars fill and numbers count up
+CLOSE_MS = 110       # panel close: fade out (exits are faster than entrances)
+STRIP_MS = 600       # strip: bar and number move to new data
 
 # ── colors ──────────────────────────────────────────────────────────────────
 LIGHT = {
@@ -169,6 +178,80 @@ def week_pace(pct, resets):
     return elapsed, label, style, f"{head} · projected ~{min(proj, 999)}%"
 
 
+def load_history():
+    try:
+        return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def record_history(data):
+    """Add this data's weekly % to the history. Only changes are kept: the % at
+    any moment is the last snapshot before it, so repeats add nothing."""
+    hist = load_history()
+    t = data.get("updated")
+    pct = int((data.get("weekly") or {}).get("percent") or 0)
+    if not t or (hist and (hist[-1].get("t") == t or hist[-1].get("pct") == pct)):
+        return hist
+    hist.append({"t": t, "pct": pct})
+    cutoff = datetime.now().astimezone() - timedelta(days=35)
+    hist = [e for e in hist if (parse_time(e.get("t") or "") or cutoff) >= cutoff]
+    try:
+        HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        HISTORY_FILE.write_text(json.dumps(hist), encoding="utf-8")
+    except Exception:
+        pass
+    return hist
+
+
+def week_days(pct, resets, hist):
+    """The 7 days of the current weekly window, each with how much of the limit
+    it used. A day's use = the weekly % at its end minus the % at its start, from
+    the history snapshots. Days the widget did not see have value None."""
+    now = datetime.now().astimezone()
+    start = resets - WEEK
+    pts = sorted((t, e.get("pct", 0)) for e in hist
+                 if (t := parse_time(e.get("t") or "")) and start <= t <= now + timedelta(minutes=5))
+
+    def pct_at(moment):
+        known = [p for t, p in pts if t <= moment]
+        return known[-1] if known else None
+
+    days = []
+    for i in range(7):
+        a = start + i * DAY
+        b = a + DAY
+        base = 0 if i == 0 else pct_at(a)            # the limit is 0% when the week starts
+        if a > now:
+            state, value = "future", None
+        elif b > now:
+            state = "today"
+            value = None if base is None else max(0, pct - base)
+        else:
+            end = pct_at(b)
+            state = "past"
+            value = None if base is None or end is None else max(0, end - base)
+        if value is None and state != "future":
+            state = "nodata" if state == "past" else state
+        days.append({"start": a, "label": (a + DAY / 2).strftime("%a"), "state": state,
+                     "value": value, "base": base})
+    return days
+
+
+def motion_enabled():
+    """Windows' "Animation effects" setting (Settings › Accessibility › Visual effects)."""
+    try:
+        on = wintypes.BOOL()
+        ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(on), 0)   # SPI_GETCLIENTAREAANIMATION
+        return bool(on.value)
+    except Exception:
+        return True
+
+
+def ease_out(t):
+    return 1 - (1 - t) ** 3
+
+
 # ── Windows helpers ─────────────────────────────────────────────────────────
 def enable_dpi_awareness():
     try:
@@ -284,6 +367,7 @@ def _svg_points(d):
 _LOGO_PTS = _svg_points(LOGO_PATH)
 
 
+@functools.lru_cache(maxsize=16)
 def logo_image(size):
     big = Image.new("RGBA", (size * SS, size * SS), (0, 0, 0, 0))
     k = size * SS / 100
@@ -291,12 +375,14 @@ def logo_image(size):
     return big.resize((size, size), Image.LANCZOS)
 
 
+@functools.lru_cache(maxsize=256)
 def rrect_image(w, h, r, fill):
     big = Image.new("RGBA", (w * SS, h * SS), (0, 0, 0, 0))
     ImageDraw.Draw(big).rounded_rectangle((0, 0, w * SS - 1, h * SS - 1), r * SS, fill=fill)
     return big.resize((w, h), Image.LANCZOS)
 
 
+@functools.lru_cache(maxsize=512)
 def bar_image(w, h, pct, track, fill, fill2, marker=None, marker_at=None, marker_w=2, marker_h=0):
     """A rounded bar with a left-to-right gradient fill and an optional mark."""
     H = max(h, marker_h)
@@ -307,12 +393,11 @@ def bar_image(w, h, pct, track, fill, fill2, marker=None, marker_at=None, marker
     dr.rounded_rectangle((0, top, w * SS - 1, top + h * SS - 1), rad, fill=track)
     if pct > 0:
         fw = max(h * SS, int(w * SS * min(pct, 100) / 100))
-        grad = Image.new("RGBA", (fw, h * SS))
-        a, b = hex_rgb(fill), hex_rgb(fill2)
-        gd = ImageDraw.Draw(grad)
-        for xx in range(fw):
-            t = xx / max(1, w * SS - 1)                                  # gradient spans the full bar
-            gd.line((xx, 0, xx, h * SS), fill=tuple(int(a[k] + (b[k] - a[k]) * t) for k in range(3)))
+        grad = Image.new("RGB", (2, 1))
+        grad.putpixel((0, 0), hex_rgb(fill))
+        grad.putpixel((1, 0), hex_rgb(fill2))
+        # the gradient spans the full bar, so a short fill stays the darker color
+        grad = grad.resize((w * SS, 1), Image.BILINEAR).crop((0, 0, fw, 1)).resize((fw, h * SS))
         mask = Image.new("L", (fw, h * SS), 0)
         ImageDraw.Draw(mask).rounded_rectangle((0, 0, fw - 1, h * SS - 1), rad, fill=255)
         big.paste(grad, (0, top), mask)
@@ -322,12 +407,64 @@ def bar_image(w, h, pct, track, fill, fill2, marker=None, marker_at=None, marker
     return big.resize((w, H), Image.LANCZOS)
 
 
+# ── tooltip (a small card that follows the mouse) ───────────────────────────
+class Tooltip:
+    def __init__(self, app):
+        self.app = app
+        self.win = None
+        self._job = None
+
+    @property
+    def hwnd(self):
+        return hwnd_of(self.win) if self.win is not None else 0
+
+    def schedule(self, lines, above_y=None, delay=350):
+        """Show `lines` after a short hover. The first line is the title."""
+        self.hide()
+        self._job = self.app.root.after(delay, lambda: self._show(lines, above_y))
+
+    def hide(self):
+        if self._job:
+            self.app.root.after_cancel(self._job)
+            self._job = None
+        if self.win is not None:
+            self.win.destroy()
+            self.win = None
+
+    def _show(self, lines, above_y):
+        self._job = None
+        app, px, F = self.app, self.app.px, self.app.fonts
+        c = app.colors()
+        self.win = w = tk.Toplevel(app.root)
+        w.overrideredirect(True)
+        w.attributes("-topmost", True)
+        cv = tk.Canvas(w, bg=c["bg"], highlightthickness=0, bd=0)
+        cv.pack()
+        fonts = [F["small_b"]] + [F["small"]] * (len(lines) - 1)
+        lh = px(19)
+        W = max(f.measure(s) for f, s in zip(fonts, lines)) + px(24)
+        H = lh * len(lines) + px(12)
+        for i, (f, s) in enumerate(zip(fonts, lines)):
+            cv.create_text(px(12), px(6) + lh * i + lh // 2, text=s, font=f, anchor="w",
+                           fill=c["text"] if i == 0 else c["sub"])
+        cv.configure(width=W, height=H)
+        mx, my = app.root.winfo_pointerxy()
+        sw = app.root.winfo_screenwidth()
+        x = min(max(mx - W // 2, px(4)), sw - W - px(4))
+        y = max(px(4), (above_y if above_y is not None else my - px(16)) - H)
+        w.geometry(f"{W}x{H}+{x}+{y}")
+        w.update_idletasks()
+        round_corners(w, c["border"])
+
+
 # ── the panel (pops up above the strip) ─────────────────────────────────────
 class Panel:
     def __init__(self, app):
         self.app = app
         self.win = None
         self.closed_at = 0.0
+        self._slide = 0          # px the panel is still below its place (open animation)
+        self._anim = 0           # id of the running animation, so a newer one stops it
 
     @property
     def is_open(self):
@@ -348,7 +485,11 @@ class Panel:
         w.configure(bg=self.c["bg"])
         self.cv = tk.Canvas(w, bg=self.c["bg"], highlightthickness=0, bd=0)
         self.cv.pack(fill="both", expand=True)
-        self.render()
+        motion = app.motion
+        if motion:
+            w.attributes("-alpha", 0.0)
+            self._slide = app.px(14)
+        self.render(0.0 if motion else 1.0)
         w.bind("<Escape>", lambda e: self.close())
         w.update_idletasks()
         round_corners(w, self.c["border"])
@@ -360,12 +501,33 @@ class Panel:
         app.redraw()
         self._watch_focus()
 
+        def step(t):
+            if self.win is not w:
+                return
+            e = ease_out(t)
+            self._slide = round((1 - ease_out(min(1.0, t * 1.4))) * app.px(14))
+            w.attributes("-alpha", min(1.0, t * 2.5))
+            self.render(e)
+        self._anim = app.animate(OPEN_MS, step)
+
+    @property
+    def animating(self):
+        return self.app.is_animating(self._anim)
+
     def close(self):
-        if self.win is not None:
-            self.win.destroy()
-            self.win = None
-            self.closed_at = datetime.now().timestamp()
-            self.app.redraw()
+        if self.win is None:
+            return
+        w, self.win = self.win, None
+        self.closed_at = datetime.now().timestamp()
+        self.app.tip.hide()
+        self.app.redraw()
+
+        def step(t):
+            try:
+                w.attributes("-alpha", 1 - t)
+            except tk.TclError:
+                pass
+        self._anim = self.app.animate(CLOSE_MS, step, w.destroy)
 
     def _watch_focus(self):
         """Close when you click into another window. Polls the foreground window:
@@ -374,7 +536,7 @@ class Panel:
         if self.win is None:
             return
         fg = ctypes.windll.user32.GetForegroundWindow()
-        if fg in (hwnd_of(self.win), self.app._hwnd):
+        if fg in (hwnd_of(self.win), self.app._hwnd, self.app.tip.hwnd):
             self._had_focus = True
         elif self._had_focus or fg != self._fg0:
             self.close()
@@ -390,9 +552,11 @@ class Panel:
         x = min(max(x, wl + app.px(8)), wr - W - app.px(8))
         bottom = min(sy, wb) - app.px(PANEL_GAP)
         y = max(wt + app.px(8), bottom - H)
-        self.win.geometry(f"{W}x{H}+{x}+{y}")
+        self.win.geometry(f"{W}x{H}+{x}+{y + self._slide}")
 
-    def render(self):
+    def render(self, e=1.0):
+        """Draw the panel. `e` (0–1) is how far the open animation has got: bars,
+        marks and numbers are drawn at that share of their value."""
         if self.win is None:
             return
         app, c, cv = self.app, self.app.colors(), self.cv
@@ -412,6 +576,10 @@ class Panel:
 
         def text(x, y, s, font, color, anchor="w", tags=()):
             return cv.create_text(x, y, text=s, font=font, fill=color, anchor=anchor, tags=tags)
+
+        def hover(tag, lines):
+            cv.tag_bind(tag, "<Enter>", lambda ev: app.tip.schedule(lines))
+            cv.tag_bind(tag, "<Leave>", lambda ev: app.tip.hide())
 
         # header: logo, "Claude Usage", updated
         y = px(30)
@@ -433,16 +601,27 @@ class Panel:
         y = px(72)
         text(pad, y, "Weekly limit · all models", F["body"], c["sub"])
         y = px(108)
-        text(pad - px(2), y, f"{pct}%", F["big"], c["crit"] if pct >= 90 else c["text"])
+        text(pad - px(2), y, f"{round(pct * e)}%", F["big"], c["crit"] if pct >= 90 else c["text"])
         if resets:
             text(right, y - px(10), f"Resets in {format_left(resets)}", F["body_b"], c["text"], anchor="e")
             text(right, y + px(13), resets.strftime("%a %H:%M"), F["body"], c["sub"], anchor="e")
 
         elapsed, label, style, detail = week_pace(pct, resets)
+        days = week_days(pct, resets, app.history) if resets else []
+        today_i = next((i for i, dd in enumerate(days) if dd["state"] == "today"), None)
         y = px(146)
         fill, fill2 = ((c["crit"], c["crit"]) if pct >= 90 else (c["fill"], c["fill2"]))
-        image(pad, y, bar_image(W - 2 * pad, px(8), pct, c["track"], fill, fill2,
-                                c["marker"], elapsed, px(2), px(18)), anchor="w")
+        image(pad, y, bar_image(W - 2 * pad, px(8), pct * e, c["track"], fill, fill2, c["marker"],
+                                None if elapsed is None else elapsed * e, px(2), px(18)),
+              anchor="w", tags="mainbar")
+        if elapsed is not None:
+            gone = round(elapsed * 100)
+            hover("mainbar", [
+                f"Day {today_i + 1 if today_i is not None else '—'} of 7 · {gone}% of the week gone",
+                f"Used {pct}% of the limit · even pace now: {gone}%",
+                "The mark moves right as the week goes on.",
+                "Stay left of it and the limit lasts the week.",
+            ])
 
         # pace pill + detail
         y = px(182)
@@ -466,20 +645,85 @@ class Panel:
                 text(right, y, note, F["small"], c["dim"], anchor="e")
             y += px(30)
 
-        def row(name, value_pct, value_text=None):
+        def row(name, value_pct, value_text=None, note=None, fill=None, tag=""):
             nonlocal y
-            text(pad, y, name, F["body"], c["text"])
+            text(pad, y, name, F["body"], c["text"], tags=tag)
+            if note:
+                text(pad + F["body"].measure(name) + px(8), y + px(1), note, F["small"], c["dim"], tags=tag)
             bx, bw = px(198), px(118)
-            image(bx, y, bar_image(bw, px(6), value_pct, c["track"], c["fill"], c["fill2"]), anchor="w")
-            text(right, y, value_text or f"{value_pct}%", F["body_b"], c["text"], anchor="e")
+            f1, f2 = (fill, fill) if fill else (c["fill"], c["fill2"])
+            image(bx, y, bar_image(bw, px(6), value_pct * e, c["track"], f1, f2), anchor="w", tags=tag)
+            text(right, y, value_text or f"{round(value_pct * e)}%", F["body_b"], c["text"], anchor="e", tags=tag)
             y += px(32)
 
-        # only the products you used this week (shares of your usage, not limits)
-        products = [p for p in d.get("products") or [] if p.get("percent")]
+        # this week by day: a column per day, and today's budget under it
+        if days:
+            section("This week by day", f"- - even pace {EVEN_DAY:.0f}% a day")
+            ch, gap = px(52), px(8)
+            colw = (W - 2 * pad - 6 * gap) // 7
+            top = y - px(12)
+            bottom = top + ch
+            scale = max(max(dd["value"] or 0 for dd in days), EVEN_DAY) * 1.15
+            faint = mix(c["track"], c["bg"], 0.45)
+            for i, dd in enumerate(days):
+                x = pad + i * (colw + gap)
+                tag = f"day{i}"
+                image(x, top, rrect_image(colw, ch, px(5), faint), tags=tag)
+                v = dd["value"]
+                if v:
+                    h = max(px(4), round(ch * v / scale * e))
+                    col = c["fill"] if dd["state"] == "today" else c["fill2"]
+                    image(x, bottom, rrect_image(colw, h, min(px(5), h // 2), col), anchor="sw", tags=tag)
+                elif dd["state"] == "nodata":
+                    text(x + colw // 2, bottom - px(10), "–", F["small"], c["dim"], anchor="center", tags=tag)
+                is_today = dd["state"] == "today"
+                text(x + colw // 2, bottom + px(12), dd["label"], F["small_b"] if is_today else F["small"],
+                     c["text"] if is_today else c["dim"], anchor="center", tags=tag)
+                a = dd["start"] + DAY / 2
+                date = f"{a:%a} {a.day} {a:%b}"
+                hover(tag, {
+                    "today":  ["Today", f"{v}% of the weekly limit so far" if v is not None else "No data yet"],
+                    "past":   [date, f"{v}% of the weekly limit"],
+                    "nodata": [date, "No data: the widget was not running"],
+                    "future": [date, "Still to come"],
+                }[dd["state"]])
+            pace_y = bottom - round(ch * EVEN_DAY / scale)
+            cv.create_line(pad, pace_y, right, pace_y, fill=c["dim"], dash=(2, 3))
+            y = bottom + px(12) + px(34)
+
+            # today's budget: what is left, spread evenly over the days that are left
+            if today_i is not None and pct < 100:
+                td = days[today_i]
+                now = datetime.now().astimezone()
+                base = td["base"] if td["base"] is not None else pct
+                since = td["start"] if td["base"] is not None else now
+                left_days = max((resets - since) / DAY, 0.1)
+                budget = max((100 - base) / left_days, 0.1)
+                used = td["value"]
+                over = used is not None and used > budget
+                row("Today", min(100, used / budget * 100) if used is not None else 0,
+                    f"{round(used * e)}%" if used is not None else "—",
+                    f"budget ~{budget:.0f}% a day", c["crit"] if over else None, "budget")
+                hover("budget", [
+                    f"Today's budget: ~{budget:.0f}% of the limit",
+                    f"{100 - base}% is left for {left_days:.1f} days.",
+                    "Over budget today" if over else "Stay under it and the limit lasts the week.",
+                ])
+            y += px(8)
+
+        # The API gives each product's share of this week's usage. Show how much of
+        # the weekly limit that share is (share × weekly %), with the share as a note.
+        # Claude Code and Chats always show; other products only once used.
+        products = [p for p in d.get("products") or []
+                    if p.get("percent") or p.get("key", p.get("name")) in
+                    ("claude_code", "chat", "Claude Code", "Chats")]
         if products:
-            section("This week by product", "share of use")
+            section("This week by product", "of weekly limit")
             for p in products:
-                row(p.get("name", "—"), int(p.get("percent") or 0))
+                share = int(p.get("percent") or 0)
+                part = share * pct / 100
+                shown = f"{round(part * e)}%" if part >= 0.5 or not share else "<1%"
+                row(p.get("name", "—"), part, shown, f"{share}% of use")
             y += px(8)
 
         fable = d.get("fable") or {}
@@ -540,6 +784,11 @@ class UsageWidget:
     def __init__(self):
         enable_dpi_awareness()
         self.data = load_data()
+        self.history = record_history(self.data)
+        self._strip_pct = float((self.data.get("weekly") or {}).get("percent") or 0)
+        self._anim_next = 0
+        self._anims = set()
+        self.motion = motion_enabled()
         self._mtime = self._file_mtime()
         self._frame = 0
         self._press = None
@@ -553,6 +802,7 @@ class UsageWidget:
         self.S = self.root.winfo_fpixels("1i") / 96.0
         self.fonts = self._make_fonts()
         self.panel = Panel(self)
+        self.tip = Tooltip(self)
         self._setup_window()
         self.canvas = tk.Canvas(self.root, width=self.W, height=self.H,
                                 bg=self.tb_bg, highlightthickness=0, bd=0)
@@ -591,6 +841,36 @@ class UsageWidget:
 
     def colors(self):
         return LIGHT if self._theme[0] else DARK
+
+    # ── animation ─────────────────────────────────────────────────────────
+    def animate(self, ms, step, done=None):
+        """Call step(t) for t from 0 to 1 over `ms` (~60 fps), then done().
+        With Windows animation effects off, it jumps straight to the end.
+        Returns an id for is_animating()."""
+        self._anim_next += 1
+        aid = self._anim_next
+        if not self.motion:
+            step(1.0)
+            if done:
+                done()
+            return aid
+        self._anims.add(aid)
+        t0 = time.perf_counter()
+
+        def frame():
+            t = min(1.0, (time.perf_counter() - t0) * 1000 / ms)
+            step(t)
+            if t < 1.0:
+                self.root.after(16, frame)
+            else:
+                self._anims.discard(aid)
+                if done:
+                    done()
+        frame()
+        return aid
+
+    def is_animating(self, aid):
+        return aid in self._anims
 
     # ── window setup ──────────────────────────────────────────────────────
     def _taskbar(self):
@@ -708,9 +988,26 @@ class UsageWidget:
 
     def _set_hover(self, on):
         self._hover = on
-        self.redraw()
+        self._redraw_strip()
+        if on and not self.panel.is_open:
+            self.tip.schedule(self._strip_tip(), above_y=self.root.winfo_y() - self.px(8), delay=600)
+        else:
+            self.tip.hide()
+
+    def _strip_tip(self):
+        d = self.data
+        wk = d.get("weekly") or {}
+        pct = int(wk.get("percent") or 0)
+        resets = reset_time(wk, d.get("updated"))
+        elapsed, label, _, _ = week_pace(pct, resets)
+        lines = [f"Weekly limit {pct}%" + (f" · {label}" if label else "")]
+        if resets:
+            lines.append(f"Resets in {format_left(resets)} ({resets:%a %H:%M})")
+            lines.append(f"{round(elapsed * 100)}% of the week gone · click for details")
+        return lines
 
     def _on_press(self, e):
+        self.tip.hide()
         self._press = (e.x_root, e.y_root, self.root.winfo_x(), self.root.winfo_y())
         self._dragging = False
 
@@ -743,9 +1040,17 @@ class UsageWidget:
 
     def _reload(self):
         self.data = load_data()
+        self.history = record_history(self.data)
         self._mtime = self._file_mtime()
         self._refresh_until = 0.0
         self.redraw()
+        # the strip's number and bar move to the new value
+        old, new = self._strip_pct, float((self.data.get("weekly") or {}).get("percent") or 0)
+        if old != new:
+            def step(t):
+                self._strip_pct = old + (new - old) * ease_out(t)
+                self._redraw_strip()
+            self.animate(STRIP_MS, step)
 
     @property
     def refreshing(self):
@@ -799,7 +1104,7 @@ class UsageWidget:
     # ── drawing ───────────────────────────────────────────────────────────
     def redraw(self):
         self._redraw_strip()
-        if self.panel.is_open:
+        if self.panel.is_open and not self.panel.animating:   # the open animation draws it
             self.panel.render()
 
     def _redraw_strip(self):
@@ -827,17 +1132,19 @@ class UsageWidget:
         d = self.data
         wk = d.get("weekly") or {}
         pct = int(wk.get("percent") or 0)
+        shown = self._strip_pct                # moves to `pct` when new data comes in
         resets = reset_time(wk, d.get("updated"))
         tx, ty = px(42), H // 2 - px(7)
         f_b, f = self.fonts["strip_b"], self.fonts["strip"]
-        cv.create_text(tx, ty, text=f"{pct}%", font=f_b, anchor="w",
+        num = f"{round(shown)}%"
+        cv.create_text(tx, ty, text=num, font=f_b, anchor="w",
                        fill=c["crit"] if pct >= 90 else fg)
         until = f"until {resets.strftime('%a')}" if resets else ""
-        cv.create_text(tx + f_b.measure(f"{pct}%") + px(6), ty, text=until, font=f, fill=sub, anchor="w")
+        cv.create_text(tx + f_b.measure(num) + px(6), ty, text=until, font=f, fill=sub, anchor="w")
 
         elapsed = week_pace(pct, resets)[0]
         fill, fill2 = (c["crit"], c["crit"]) if pct >= 90 else (c["fill"], c["fill2"])
-        image(tx, H // 2 + px(10), bar_image(W - tx - px(12), px(4), pct, mix(bg, fg, 0.16),
+        image(tx, H // 2 + px(10), bar_image(W - tx - px(12), px(4), shown, mix(bg, fg, 0.16),
                                              fill, fill2, sub, elapsed, max(1, px(2)), px(10)))
 
     def run(self):

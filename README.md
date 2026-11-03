@@ -5,11 +5,15 @@ A Windows taskbar widget that shows your [claude.ai](https://claude.ai) plan lim
 A small strip sits on the taskbar: `51% until Tue`, with a bar. The mark on the bar shows how much of the week has gone, so you can see at a glance whether you are ahead of it. Click the strip to open the panel:
 
 - **Weekly limit**: the 7-day limit across all models, when it resets, and your pace — `On track`, `Tight` or `Over pace`, from the share of the week gone and the projected end-of-week usage
-- **This week by product**: each product's share of your usage this week (Claude Code, Chats, Cowork, …), as claude.ai reports it. Products you did not use are left out
+- **This week by day**: a column for each day of the weekly window, with a dashed line at an even pace (~14% a day). The widget keeps its own history of your weekly % (`%LOCALAPPDATA%\claude-usage-widget\history.json`), so the chart fills in from the day you start it; a day it did not see shows `–`
+- **Today**: today's budget — the limit that is left, spread evenly over the days that are left — and how much of it you used today. The bar turns red when you go over
+- **This week by product**: how much of the weekly limit each product used. claude.ai reports each product's share of your usage; the panel shows that share of your weekly % (with 5% used and Claude Code at 100% of use, Claude Code shows 5%), and the share itself as a small note. Claude Code and Chats always show; Cowork and Other only once you use them
 - **Other limits**: the separate weekly Fable limit (only if your plan has one) and extra usage (only when it is on)
 - **Open usage page**, **Refresh** and **Quit** buttons
 
 Bars turn **red at 90%**. The strip and the panel follow the Windows light/dark setting.
+
+Hover the strip, the weekly bar, a day column or the Today row for a tooltip with the details. The panel slides in, its bars fill and its numbers count up; the strip moves smoothly to new data. Turn off **Settings › Accessibility › Visual effects › Animation effects** and the widget shows everything at once, without motion.
 
 > **Unofficial.** Not affiliated with Anthropic. It reads the same internal endpoint the claude.ai settings page uses, which can change without notice.
 
@@ -199,7 +203,8 @@ The widget reads this file:
   "weekly":  { "percent": 54, "resets_in": "2d 7h", "resets_at": "2026-10-03T19:00:00Z" },
   "fable":   { "percent": 92, "resets_in": "7h", "resets_at": "2026-10-01T19:00:00Z", "available": true },
   "extra":   { "enabled": true, "spent": 0.0, "percent": 0, "limit": 12.0, "resets": "1st of month" },
-  "products": [ { "name": "Claude Code", "percent": 92 }, { "name": "Chats", "percent": 8 } ],
+  "products": [ { "key": "claude_code", "name": "Claude Code", "percent": 92 },
+                { "key": "chat", "name": "Chats", "percent": 8 } ],
   "updated": "2026-10-01T11:41:48"
 }
 ```

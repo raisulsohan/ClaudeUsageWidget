@@ -121,7 +121,7 @@ def parse(raw: dict, org: dict) -> dict:
         "weekly":  window(find_limit(limits, "weekly_all"), raw.get("seven_day")),
         "fable":   {**window(fable), "available": fable is not None},
         # each product's share of this week's usage (the rows add up to 100)
-        "products": [{"name": r.get("display_name") or r.get("key") or "—",
+        "products": [{"key": r.get("key") or "", "name": r.get("display_name") or r.get("key") or "—",
                       "percent": int(round(float(r.get("percent") or 0)))} for r in rows],
         "extra": {
             "enabled": bool(sp.get("enabled", ex.get("is_enabled", False))),
