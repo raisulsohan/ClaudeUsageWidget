@@ -11,4 +11,15 @@ chrome.runtime.onStartup.addListener(fetchAndPost);
 
 // every 5 minutes
 chrome.alarms.create("fetch-usage", { periodInMinutes: 5 });
-chrome.alarms.onAlarm.addListener((a) => { if (a.name === "fetch-usage") fetchAndPost(); });
+// every 30 s, ask the receiver whether the widget's Refresh button was pressed
+chrome.alarms.create("poll-refresh", { periodInMinutes: 0.5 });
+
+chrome.alarms.onAlarm.addListener(async (a) => {
+  if (a.name === "fetch-usage") fetchAndPost();
+  if (a.name === "poll-refresh") {
+    try {
+      const r = await fetch("http://127.0.0.1:8765/pending");
+      if (r.ok && (await r.json()).refresh) fetchAndPost();
+    } catch (e) { /* receiver not running */ }
+  }
+});

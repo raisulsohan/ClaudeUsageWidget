@@ -1,5 +1,6 @@
 # personal usage data and logs
 usage_data.json
+usage_raw.json
 fetch.log
 
 # local tooling

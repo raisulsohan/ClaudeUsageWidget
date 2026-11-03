@@ -10,7 +10,6 @@ Build:  build_installer.bat  (makes installer\ClaudeUsageWidget-Setup.exe)
 """
 
 import threading
-from http.server import HTTPServer
 
 import receiver
 import widget
@@ -18,7 +17,7 @@ import widget
 
 def start_receiver():
     try:
-        httpd = HTTPServer((receiver.HOST, receiver.PORT), receiver.Handler)
+        httpd = receiver.Server((receiver.HOST, receiver.PORT), receiver.Handler)
     except OSError:
         return  # port in use: another receiver is already running
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

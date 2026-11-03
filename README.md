@@ -1,16 +1,19 @@
 # Claude Usage Widget — Windows
 
-A Windows desktop widget that shows your [claude.ai](https://claude.ai) plan limits at a glance, so you see a limit coming before you hit it.
+A Windows taskbar widget that shows your [claude.ai](https://claude.ai) plan limits at a glance, so you see a limit coming before you hit it.
 
-- **Weekly**: the 7-day limit across all models
-- **Fable**: the separate weekly Fable limit (shown only if your plan has one)
-- **Extra usage**: credits spent against your monthly cap
+A small strip sits on the taskbar: `51% until Tue`, with a bar. The mark on the bar shows how much of the week has gone, so you can see at a glance whether you are ahead of it. Click the strip to open the panel:
 
-Bars turn **amber at 75%** and **red at 90%**. A pixel-art mascot reacts to your weekly usage: calm when you're idle, sweating at 75%, panicking at 90%, asleep once you hit the limit.
+- **Weekly limit**: the 7-day limit across all models, when it resets, and your pace — `On track`, `Tight` or `Over pace`, from the share of the week gone and the projected end-of-week usage
+- **This week by product**: each product's share of your usage this week (Claude Code, Chats, Cowork, …), as claude.ai reports it. Products you did not use are left out
+- **Other limits**: the separate weekly Fable limit (only if your plan has one) and extra usage (only when it is on)
+- **Open usage page**, **Refresh** and **Quit** buttons
+
+Bars turn **red at 90%**. The strip and the panel follow the Windows light/dark setting.
 
 > **Unofficial.** Not affiliated with Anthropic. It reads the same internal endpoint the claude.ai settings page uses, which can change without notice.
 
-This is a Windows port of [sdezubiria's macOS widget](https://github.com/sdezubiria/claude-usage-widget). The macOS parts (Keychain, launchd, Übersicht) are replaced with Windows equivalents: DPAPI / Credential Manager, Task Scheduler, and a tkinter window that now carries the mascot itself.
+This is a Windows port of [sdezubiria's macOS widget](https://github.com/sdezubiria/claude-usage-widget). The macOS parts (Keychain, launchd, Übersicht) are replaced with Windows equivalents: DPAPI / Credential Manager, Task Scheduler, and a tkinter window.
 
 ---
 
@@ -100,7 +103,9 @@ Once the one-time setup is done (Python, `pip install`, and the extension loaded
 
 Steps 2 and 3 are exactly what `Start Widget.cmd` does for you, so after loading the extension once you can just double-click that.
 
-Make sure you're logged in to claude.ai in that browser. The extension refreshes every 5 minutes on its own. To push immediately, open `chrome://extensions`, find the widget, and click the service-worker **reload**. Check its logs via the extension's **service worker** link.
+Make sure you're logged in to claude.ai in that browser. The extension refreshes every 5 minutes on its own. To push sooner, click **Refresh** in the widget's panel: the extension picks the request up within 30 seconds. Check its logs via the extension's **service worker** link.
+
+After you update the project, open `chrome://extensions` and click the widget's **reload** button, so Chrome runs the new extension code.
 
 ### Method B — cookie / paste (Firefox-family, or any browser)
 
@@ -118,7 +123,7 @@ Make sure you're logged in to claude.ai in that browser. The extension refreshes
 
 ### The widget
 
-Drag to move, double-click to refresh, right-click to quit. Leave it running — it picks up new data on its own. To start it at logon with the extension method, use the `Start Widget.cmd` Startup shortcut described under [One-click start](#one-click-start-windows-extension-method). With the cookie/paste method, put a shortcut to `widget.py` (opened with `pythonw.exe`) in the same Startup folder instead: press **Win+R**, type `shell:startup`, and drop the shortcut there.
+Click (or right-click) the strip to open the panel; click anywhere else or press **Esc** to close it. Drag the strip to move it. **Quit** is in the panel. Leave it running — it picks up new data on its own. To start it at logon with the extension method, use the `Start Widget.cmd` Startup shortcut described under [One-click start](#one-click-start-windows-extension-method). With the cookie/paste method, put a shortcut to `widget.py` (opened with `pythonw.exe`) in the same Startup folder instead: press **Win+R**, type `shell:startup`, and drop the shortcut there.
 
 ---
 
@@ -158,19 +163,17 @@ Either way, another user account on the PC can't read it.
 
 ---
 
-## The mascot
+## The pace
 
-The pixel robot's mood follows your **weekly** usage:
+The week starts 7 days before the weekly limit resets. The panel compares your usage with the share of the week that has gone, and projects where you will end the week at the same rate:
 
-| Weekly | Mood |
+| Projected | Shows |
 |---|---|
-| under 25% | idle — slow breathing, blinking |
-| 25–74% | working — walks in place |
-| 75–89% | hustling — faster, sweat drop |
-| 90–99% | panicking — shaking, sweating |
-| 100% | resting — eyes shut, floating z's |
+| up to 90% | **On track** |
+| 91–100% | **Tight** |
+| over 100% | **Over pace** — at this rate you hit the limit before it resets |
 
-To change the thresholds, edit `mood_for()` in `widget.py`. Colors live in the `C` dict at the top of the same file.
+In the first ~5 hours of a week it shows **New week**, because a projection is not useful yet. To change the thresholds, edit `week_pace()` in `widget.py`. Colors live in the `LIGHT` and `DARK` dicts at the top of the same file.
 
 ---
 
@@ -178,9 +181,9 @@ To change the thresholds, edit `mood_for()` in `widget.py`. Colors live in the `
 
 | What | How |
 |---|---|
-| **Widget layout** | `LAYOUT` at the top of `widget.py`: `"compact"` (small strip above the taskbar, default), `"horizontal"` (wide strip), or `"vertical"` (corner card) |
-| **Compact size / text** | `COMPACT_W` (width), `COMPACT_H` (height) at the top of `widget.py`. Text sizes are the `size=` values in `_redraw_compact` |
+| **Strip / panel width** | `STRIP_W`, `PANEL_W` at the top of `widget.py` (px at 100% display scaling; the widget scales them for you) |
 | **Keep clear of the clock** | `TRAY_MARGIN` (px reserved on the right for the system tray) — the widget can't be dragged past it |
+| **"Updated" warning** | `STALE_MIN`: the panel's "Updated … ago" turns amber when the data is older than this |
 | **Remembered position** | The widget reopens where you last dragged it (`%LOCALAPPDATA%\claude-usage-widget\widget_pos.json`), clamped so it can't hide behind the taskbar or slide into the tray. Delete that file to reset to the default spot |
 | **Use one browser only** | `--browser NAME`, or set `CLAUDE_BROWSER=NAME` |
 | **Fetch interval** | `py fetch_usage.py --loop 120` (seconds). Default is 300 |
@@ -193,9 +196,10 @@ The widget reads this file:
 ```json
 {
   "plan": "Max",
-  "weekly":  { "percent": 54, "resets_in": "2d 7h" },
-  "fable":   { "percent": 92, "resets_in": "7h", "available": true },
+  "weekly":  { "percent": 54, "resets_in": "2d 7h", "resets_at": "2026-10-03T19:00:00Z" },
+  "fable":   { "percent": 92, "resets_in": "7h", "resets_at": "2026-10-01T19:00:00Z", "available": true },
   "extra":   { "enabled": true, "spent": 0.0, "percent": 0, "limit": 12.0, "resets": "1st of month" },
+  "products": [ { "name": "Claude Code", "percent": 92 }, { "name": "Chats", "percent": 8 } ],
   "updated": "2026-10-01T11:41:48"
 }
 ```
@@ -213,6 +217,7 @@ Get-Content fetch.log -Tail 20
 **Using the extension and nothing updates** — check, in order:
 
 - Is `receiver.py` running? Its window prints a line each time the extension pushes. If the extension logs `is receiver.py running?`, start it (`Start Widget.cmd` does this).
+- Is another program using port 8765? The receiver takes the port for itself and stops with `Port 8765 is already in use` when something else holds it. Find the program with `netstat -ano | findstr :8765`, stop it, then start the receiver again.
 - Open `chrome://extensions` → the widget's **service worker** link → Console. `logged in to claude.ai?` means log in; a receiver error means the receiver isn't reachable on `127.0.0.1:8765`.
 - Click the service worker **reload** to push immediately instead of waiting 5 minutes.
 
@@ -236,7 +241,7 @@ Start-ScheduledTask -TaskName ClaudeUsageWidget
 ## Project layout
 
 ```
-widget.py           floating tkinter widget, with the mascot
+widget.py           taskbar strip and usage panel (tkinter + Pillow)
 usage_data.json     written by either method, read by the widget
 
 Method A (Chrome extension)

@@ -1,4 +1,5 @@
 curl_cffi>=0.7
 cryptography>=42
+Pillow>=10
 # Optional: use Windows Credential Manager instead of a DPAPI-encrypted file.
 # keyring>=24

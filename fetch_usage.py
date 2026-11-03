@@ -108,17 +108,21 @@ def window(lim: dict | None, legacy: dict | None = None) -> dict:
     else:
         legacy = legacy or {}
         pct, resets = legacy.get("utilization"), legacy.get("resets_at")
-    return {"percent": int(round(float(pct or 0))), "resets_in": secs_to_hm(resets)}
+    return {"percent": int(round(float(pct or 0))), "resets_in": secs_to_hm(resets), "resets_at": resets}
 
 def parse(raw: dict, org: dict) -> dict:
     limits = raw.get("limits") or []
     fable  = find_limit(limits, "weekly_scoped", "Fable")
     sp     = raw.get("spend") or {}
     ex     = raw.get("extra_usage") or {}
+    rows   = (raw.get("seven_day_breakdown") or {}).get("rows") or []
     return {
         "plan":    plan_name(org),
         "weekly":  window(find_limit(limits, "weekly_all"), raw.get("seven_day")),
         "fable":   {**window(fable), "available": fable is not None},
+        # each product's share of this week's usage (the rows add up to 100)
+        "products": [{"name": r.get("display_name") or r.get("key") or "—",
+                      "percent": int(round(float(r.get("percent") or 0)))} for r in rows],
         "extra": {
             "enabled": bool(sp.get("enabled", ex.get("is_enabled", False))),
             "spent":   money(sp.get("used"))  if sp else (ex.get("used_credits") or 0) / 100,
