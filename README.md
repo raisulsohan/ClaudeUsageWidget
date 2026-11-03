@@ -2,6 +2,16 @@
 
 A Windows taskbar widget that shows your [claude.ai](https://claude.ai) plan limits at a glance, so you see a limit coming before you hit it.
 
+<p align="center">
+  <img src="docs/panel-light.png" width="380" alt="The usage panel in the light theme">
+  &nbsp;
+  <img src="docs/panel-dark.png" width="380" alt="The usage panel in the dark theme">
+</p>
+<p align="center">
+  <img src="docs/strip.png" alt="The strip on the taskbar: 51% until Thu"><br>
+  <sub>The panel (light and dark) and the strip on the taskbar, with example data.</sub>
+</p>
+
 A small strip sits on the taskbar: `51% until Tue`, with a bar. The mark on the bar shows how much of the week has gone, so you can see at a glance whether you are ahead of it. Click the strip to open the panel:
 
 - **Weekly limit**: the 7-day limit across all models, when it resets, and your pace — `On track`, `Tight` or `Over pace`, from the share of the week gone and the projected end-of-week usage
@@ -247,6 +257,7 @@ Start-ScheduledTask -TaskName ClaudeUsageWidget
 
 ```
 widget.py           taskbar strip and usage panel (tkinter + Pillow)
+docs/               screenshots for this README
 usage_data.json     written by either method, read by the widget
 
 Method A (Chrome extension)
