@@ -21,7 +21,9 @@ A small strip sits on the taskbar: `51% until Tue`, with a bar. The mark on the 
 - **Other limits**: the separate weekly Fable limit (only if your plan has one) and extra usage (only when it is on)
 - **Open usage page**, **Refresh** and **Quit** buttons
 
-Bars turn **red at 90%**. The strip and the panel follow the Windows light/dark setting.
+Bars turn **red at 90%**.
+
+**Theme:** the panel follows the Windows light/dark setting. To choose yourself, click the theme button next to **Quit**: it goes round **Same as Windows** (half circle) → **Light** (sun) → **Dark** (moon). Your choice is kept in `%LOCALAPPDATA%\claude-usage-widget\settings.json`. The strip always takes the taskbar's color, so it blends in.
 
 Hover the strip, the weekly bar, a day column or the Today row for a tooltip with the details. The panel slides in, its bars fill and its numbers count up; the strip moves smoothly to new data. Turn off **Settings › Accessibility › Visual effects › Animation effects** and the widget shows everything at once, without motion.
 

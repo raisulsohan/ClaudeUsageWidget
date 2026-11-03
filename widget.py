@@ -15,6 +15,7 @@ data on its own (watches the file's modification time).
 import ctypes
 import functools
 import json
+import math
 import os
 import re
 import sys
@@ -39,6 +40,9 @@ POS_FILE = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "claude-usage-w
 POS_KEY = "compact"
 # weekly % snapshots, one per data update, for the "by day" chart (last 35 days)
 HISTORY_FILE = POS_FILE.parent / "history.json"
+# your choices in the panel, e.g. {"theme": "dark"}
+SETTINGS_FILE = POS_FILE.parent / "settings.json"
+THEMES = ("system", "light", "dark")     # the panel's theme button goes round in this order
 
 USAGE_PAGE = "https://claude.ai/settings/limits"
 RECEIVER_REFRESH = "http://127.0.0.1:8765/refresh"
@@ -252,6 +256,22 @@ def ease_out(t):
     return 1 - (1 - t) ** 3
 
 
+def load_settings():
+    try:
+        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_settings(**changes):
+    s = {**load_settings(), **changes}
+    try:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(json.dumps(s), encoding="utf-8")
+    except Exception:
+        pass
+
+
 # ── Windows helpers ─────────────────────────────────────────────────────────
 def enable_dpi_awareness():
     try:
@@ -372,6 +392,33 @@ def logo_image(size):
     big = Image.new("RGBA", (size * SS, size * SS), (0, 0, 0, 0))
     k = size * SS / 100
     ImageDraw.Draw(big).polygon([(px * k, py * k) for px, py in _LOGO_PTS], fill=LOGO)
+    return big.resize((size, size), Image.LANCZOS)
+
+
+@functools.lru_cache(maxsize=16)
+def theme_icon(mode, size, color):
+    """Sun (light), moon (dark) or a half-filled circle (follow Windows)."""
+    S = size * SS
+    big = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(big)
+    c = S / 2
+    if mode == "light":
+        r = S * 0.19
+        dr.ellipse((c - r, c - r, c + r, c + r), fill=color)
+        for k in range(8):
+            a = k * math.pi / 4
+            dx, dy = math.cos(a), math.sin(a)
+            dr.line((c + dx * S * 0.31, c + dy * S * 0.31, c + dx * S * 0.44, c + dy * S * 0.44),
+                    fill=color, width=round(S * 0.075))
+    elif mode == "dark":
+        r = S * 0.36
+        dr.ellipse((c - r, c - r, c + r, c + r), fill=color)
+        cx, cy, r2 = c + S * 0.2, c - S * 0.16, S * 0.3
+        dr.ellipse((cx - r2, cy - r2, cx + r2, cy + r2), fill=(0, 0, 0, 0))   # cut the crescent
+    else:
+        r = S * 0.36
+        dr.ellipse((c - r, c - r, c + r, c + r), outline=color, width=round(S * 0.075))
+        dr.pieslice((c - r, c - r, c + r, c + r), 90, 270, fill=color)
     return big.resize((size, size), Image.LANCZOS)
 
 
@@ -749,6 +796,7 @@ class Panel:
             x += self._button(x, y, bh, label_, cmd) + px(8)
         qw = F["body"].measure("Quit") + px(24)
         self._button(right - qw, y, bh, "Quit", app.quit)
+        self._theme_button(right - qw - px(8) - bh, y, bh)
 
         H = y + bh // 2 + pad - px(4)
         cv.configure(width=W, height=H)
@@ -770,6 +818,45 @@ class Panel:
         cv.tag_bind(tag, "<ButtonPress-1>", lambda e: cv.itemconfigure(bg, image=states["press"]))
         cv.tag_bind(tag, "<ButtonRelease-1>", lambda e: (cv.itemconfigure(bg, image=states["hover"]), cmd()))
         return w
+
+    def _theme_button(self, x, y, h):
+        """A square button with the current theme's icon; a click picks the next theme."""
+        app, c, cv, px = self.app, self.c, self.cv, self.app.px
+        pref = app.theme_pref
+        tag = "btn_theme"
+        states = {k: ImageTk.PhotoImage(rrect_image(h, h, px(6), c[k])) for k in ("btn", "hover", "press")}
+        icon = ImageTk.PhotoImage(theme_icon(pref, px(16), c["text"]))
+        self.imgs.extend([*states.values(), icon])
+        bg = cv.create_image(x, y, image=states["btn"], anchor="w", tags=tag)
+        cv.create_image(x + h // 2, y, image=icon, anchor="center", tags=tag)
+        nxt = THEMES[(THEMES.index(pref) + 1) % len(THEMES)]
+        names = {"system": "Same as Windows", "light": "Light", "dark": "Dark"}
+        lines = [f"Theme: {names[pref]}", f"Click for {names[nxt]}"]
+
+        def enter(_e):
+            cv.itemconfigure(bg, image=states["hover"])
+            cv.configure(cursor="hand2")
+            app.tip.schedule(lines)
+
+        def leave(_e):
+            cv.itemconfigure(bg, image=states["btn"])
+            cv.configure(cursor="")
+            app.tip.hide()
+
+        cv.tag_bind(tag, "<Enter>", enter)
+        cv.tag_bind(tag, "<Leave>", leave)
+        cv.tag_bind(tag, "<ButtonPress-1>", lambda e: cv.itemconfigure(bg, image=states["press"]))
+        cv.tag_bind(tag, "<ButtonRelease-1>", lambda e: app.next_theme())
+
+    def retheme(self):
+        """Redraw an open panel in the current colors (after a theme change)."""
+        if self.win is None:
+            return
+        c = self.app.colors()
+        self.win.configure(bg=c["bg"])
+        self.cv.configure(bg=c["bg"])
+        round_corners(self.win, c["border"])
+        self.render()
 
     def _open_page(self):
         webbrowser.open(USAGE_PAGE)
@@ -796,6 +883,9 @@ class UsageWidget:
         self._hover = False
         self._refresh_until = 0.0
         self._theme = (light_theme("AppsUseLightTheme"), light_theme("SystemUsesLightTheme"))
+        self.theme_pref = load_settings().get("theme")
+        if self.theme_pref not in THEMES:
+            self.theme_pref = "system"
 
         self.root = tk.Tk()
         self.root.title("Claude Usage Widget")
@@ -840,7 +930,16 @@ class UsageWidget:
         }
 
     def colors(self):
+        """Panel and tooltip colors: your theme choice, or Windows' app theme."""
+        if self.theme_pref != "system":
+            return LIGHT if self.theme_pref == "light" else DARK
         return LIGHT if self._theme[0] else DARK
+
+    def next_theme(self):
+        self.theme_pref = THEMES[(THEMES.index(self.theme_pref) + 1) % len(THEMES)]
+        save_settings(theme=self.theme_pref)
+        self.tip.hide()
+        self.panel.retheme()
 
     # ── animation ─────────────────────────────────────────────────────────
     def animate(self, ms, step, done=None):
