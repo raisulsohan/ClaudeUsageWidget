@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Claude Usage Widget",
-  "version": "1.0",
+  "version": "2.0.0",
   "description": "Pushes your claude.ai usage to the local desktop widget every 5 minutes.",
   "permissions": ["alarms", "storage"],
   "host_permissions": [
