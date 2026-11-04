@@ -1017,10 +1017,14 @@ class UsageWidget:
                 img = ImageGrab.grab(bbox=(left, y + 2, left + cw, y + H - 2)).convert("RGB")
             except Exception:
                 return None
-            n = img.width * img.height
-            count, rgb = max(img.getcolors(n) or [(0, None)])
-            if rgb and count >= n * 0.6:              # a plain area, not an icon
-                sides.append(rgb)
+            # The taskbar can have a fine grain (acrylic noise), so no one color
+            # is the most common by far. Take the median color, and call the area
+            # plain (not an icon) when most pixels are close to it.
+            px_ = list(getattr(img, "get_flattened_data", img.getdata)())
+            med = tuple(sorted(p[i] for p in px_)[len(px_) // 2] for i in range(3))
+            near = [p for p in px_ if sum(abs(p[i] - med[i]) for i in range(3)) <= 12]
+            if len(near) >= len(px_) * 0.8:
+                sides.append(tuple(round(sum(p[i] for p in near) / len(near)) for i in range(3)))
         if not sides:
             return None
         if len(sides) == 2 and sum(abs(a - b) for a, b in zip(*sides)) > 12:
@@ -1034,11 +1038,14 @@ class UsageWidget:
         seen twice in a row, so a short flash does not change the strip."""
         if self._dragging:
             return
+        def far(a, b, limit=4):              # ignore the grain's small changes
+            return b is None or sum(abs(p - q) for p, q in zip(hex_rgb(a), hex_rgb(b))) > limit
+
         col = self._sample_beside()
-        if not col or col == self.tb_bg:
+        if not col or not far(col, self.tb_bg):
             self._tb_seen = None
             return
-        if col != getattr(self, "_tb_seen", None):
+        if far(col, getattr(self, "_tb_seen", None)):
             self._tb_seen = col
             return
         self._tb_seen = None
