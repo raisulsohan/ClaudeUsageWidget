@@ -3,7 +3,7 @@
 ; Installs per user (no admin prompt) to %LOCALAPPDATA%\Programs\Claude Usage Widget.
 
 #define AppName "Claude Usage Widget"
-#define AppVersion "2.0.0"
+#define AppVersion "2.0.1"
 #define AppExe "ClaudeUsageWidget.exe"
 
 [Setup]
