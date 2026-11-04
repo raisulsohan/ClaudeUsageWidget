@@ -239,6 +239,11 @@ def run_once(verbose=True):
     data = fetch()
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
+    try:
+        import usage_history
+        usage_history.record(data)
+    except Exception:
+        pass
     if verbose:
         ts = datetime.now().strftime("%H:%M:%S")
         log(f"[{ts}] weekly={data['weekly']['percent']}%  "

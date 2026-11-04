@@ -32,14 +32,14 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageGrab, ImageTk
 
+import usage_history   # weekly % snapshots for the "by day" chart (next to usage_data.json)
+
 # next to the .exe when built with PyInstaller, else next to this script
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
 DATA_FILE = APP_DIR / "usage_data.json"
 # remembers where you last dragged the strip
 POS_FILE = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "claude-usage-widget" / "widget_pos.json"
 POS_KEY = "compact"
-# weekly % snapshots, one per data update, for the "by day" chart (last 35 days)
-HISTORY_FILE = POS_FILE.parent / "history.json"
 # your choices in the panel, e.g. {"theme": "dark"}
 SETTINGS_FILE = POS_FILE.parent / "settings.json"
 THEMES = ("system", "light", "dark")     # the panel's theme button goes round in this order
@@ -126,13 +126,21 @@ def reset_time(win, updated):
     """When a limit window resets: `resets_at` if present, else `resets_in`
     ("6d 7h 37m") counted from the `updated` time (older data files)."""
     t = parse_time(win.get("resets_at") or "")
-    if t:
-        return t
-    base = parse_time(updated or "")
-    parts = dict((u, int(n)) for n, u in re.findall(r"(\d+)\s*([dhm])", win.get("resets_in") or ""))
-    if not base or not parts:
-        return None
-    return base + timedelta(days=parts.get("d", 0), hours=parts.get("h", 0), minutes=parts.get("m", 0))
+    if not t:
+        base = parse_time(updated or "")
+        parts = dict((u, int(n)) for n, u in re.findall(r"(\d+)\s*([dhm])", win.get("resets_in") or ""))
+        if not base or not parts:
+            return None
+        t = base + timedelta(days=parts.get("d", 0), hours=parts.get("h", 0), minutes=parts.get("m", 0))
+    # The API gives the same reset as 17:59:59.9 one time and 18:00:00.07 the
+    # next. Round to the minute, so the day shown does not flip between updates.
+    return (t + timedelta(seconds=30)).replace(second=0, microsecond=0)
+
+
+def reset_label(t, fmt):
+    """The last minute of the window, e.g. 'Mon 23:59' for a reset at Tue 00:00:
+    you can use the limit until then."""
+    return (t - timedelta(minutes=1)).strftime(fmt)
 
 
 def format_left(t):
@@ -183,29 +191,11 @@ def week_pace(pct, resets):
 
 
 def load_history():
-    try:
-        return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return []
+    return usage_history.load()
 
 
 def record_history(data):
-    """Add this data's weekly % to the history. Only changes are kept: the % at
-    any moment is the last snapshot before it, so repeats add nothing."""
-    hist = load_history()
-    t = data.get("updated")
-    pct = int((data.get("weekly") or {}).get("percent") or 0)
-    if not t or (hist and (hist[-1].get("t") == t or hist[-1].get("pct") == pct)):
-        return hist
-    hist.append({"t": t, "pct": pct})
-    cutoff = datetime.now().astimezone() - timedelta(days=35)
-    hist = [e for e in hist if (parse_time(e.get("t") or "") or cutoff) >= cutoff]
-    try:
-        HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        HISTORY_FILE.write_text(json.dumps(hist), encoding="utf-8")
-    except Exception:
-        pass
-    return hist
+    return usage_history.record(data)
 
 
 def week_days(pct, resets, hist):
@@ -525,6 +515,7 @@ class Panel:
 
     def open(self):
         app = self.app
+        app.tip.hide()               # a strip tooltip still waiting to show would cover the panel
         self.win = w = tk.Toplevel(app.root)
         w.overrideredirect(True)
         w.attributes("-topmost", True)
@@ -651,7 +642,7 @@ class Panel:
         text(pad - px(2), y, f"{round(pct * e)}%", F["big"], c["crit"] if pct >= 90 else c["text"])
         if resets:
             text(right, y - px(10), f"Resets in {format_left(resets)}", F["body_b"], c["text"], anchor="e")
-            text(right, y + px(13), resets.strftime("%a %H:%M"), F["body"], c["sub"], anchor="e")
+            text(right, y + px(13), reset_label(resets, "%a %H:%M"), F["body"], c["sub"], anchor="e")
 
         elapsed, label, style, detail = week_pace(pct, resets)
         days = week_days(pct, resets, app.history) if resets else []
@@ -898,6 +889,9 @@ class UsageWidget:
                                 bg=self.tb_bg, highlightthickness=0, bd=0)
         self.canvas.pack()
         self._bind_events()
+        self.root.update()                    # the window must exist before it gets an owner
+        self._own_by_taskbar()
+        self._hook_foreground()
         self.redraw()
         self._tick()
 
@@ -1008,6 +1002,51 @@ class UsageWidget:
         except Exception:
             return fallback
 
+    def _sample_beside(self):
+        """The taskbar's color in thin columns just left and right of the strip,
+        read without hiding the strip. None when the two sides do not agree
+        (an icon, a full-screen app or anything else that is not plain taskbar)."""
+        x, y, W, H = self.root.winfo_x(), self.root.winfo_y(), self.W, self.H
+        gap, cw = self.px(3), self.px(8)
+        sw = self.root.winfo_screenwidth()
+        sides = []
+        for left in (x - gap - cw, x + W + gap):
+            if left < 0 or left + cw > sw:
+                continue
+            try:
+                img = ImageGrab.grab(bbox=(left, y + 2, left + cw, y + H - 2)).convert("RGB")
+            except Exception:
+                return None
+            n = img.width * img.height
+            count, rgb = max(img.getcolors(n) or [(0, None)])
+            if rgb and count >= n * 0.6:              # a plain area, not an icon
+                sides.append(rgb)
+        if not sides:
+            return None
+        if len(sides) == 2 and sum(abs(a - b) for a, b in zip(*sides)) > 12:
+            return None
+        return rgb_hex(sides[0])
+
+    def _follow_taskbar(self):
+        """Keep the strip the same color as the taskbar. The taskbar color
+        changes with the wallpaper, the accent color and transparency, and at
+        sign-in it is not painted yet when the strip starts. A new color must be
+        seen twice in a row, so a short flash does not change the strip."""
+        if self._dragging:
+            return
+        col = self._sample_beside()
+        if not col or col == self.tb_bg:
+            self._tb_seen = None
+            return
+        if col != getattr(self, "_tb_seen", None):
+            self._tb_seen = col
+            return
+        self._tb_seen = None
+        self.tb_bg = col
+        self.root.configure(bg=col)
+        self.canvas.configure(bg=col)
+        self._redraw_strip()
+
     def _resample(self):
         """Theme changed: hide, read the taskbar color again, show."""
         r = self.root
@@ -1062,6 +1101,7 @@ class UsageWidget:
             pass
 
     def quit(self):
+        self.quitting = True
         self._save_pos()
         self.root.destroy()
 
@@ -1074,6 +1114,68 @@ class UsageWidget:
                 0, 0, 0, 0, 0x0013)                          # NOMOVE|NOSIZE|NOACTIVATE
         except Exception:
             pass
+
+    def _own_by_taskbar(self):
+        """Make the taskbar the strip's owner window. Windows keeps an owned
+        window above its owner, also when the Start menu (or search, or the
+        notification center) lifts the taskbar into a layer above all normal
+        topmost windows; without an owner the strip was hidden while Start was
+        open. (A child window of the taskbar does not work on Windows 11: the
+        taskbar's XAML layer draws over every child window.)
+        The strip and the taskbar then share one input queue, so the strip must
+        never block for long."""
+        try:
+            u = ctypes.windll.user32
+            tray = u.FindWindowW("Shell_TrayWnd", None)
+            if not tray or not self._hwnd:
+                return
+            u.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+            u.SetWindowLongPtrW.argtypes = (wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t)
+            u.SetWindowLongPtrW(self._hwnd, -8, tray)                  # GWLP_HWNDPARENT = owner
+            self._tray = tray
+            self._assert_topmost()
+        except Exception:
+            pass
+
+    def _hook_foreground(self):
+        """Go back on top the moment another window comes to the front.
+        A click on the taskbar (or the Start button, or a tray icon) brings the
+        taskbar to the front, over the strip; the 3-second check alone left the
+        strip hidden for up to 3 s, so it seemed to blink and jump. The taskbar
+        can raise itself a moment after the event, so check again soon after."""
+        WINEVENTPROC = ctypes.WINFUNCTYPE(None, wintypes.HANDLE, wintypes.DWORD, wintypes.HWND,
+                                          wintypes.LONG, wintypes.LONG, wintypes.DWORD, wintypes.DWORD)
+
+        # The callback runs inside Tk's own message loop, so it must not call Tk
+        # (that kills Python: "PyEval_RestoreThread … GIL is released"). It only
+        # calls Win32 and sets a time; _zorder_watch (a Tk timer) does the rest.
+        hwnd = self._hwnd
+
+        def on_event(_hook, _event, _hwnd, _obj, _child, _thread, _time):
+            if not self._dragging and hwnd:
+                ctypes.windll.user32.SetWindowPos(ctypes.c_void_p(hwnd), ctypes.c_void_p(-1),
+                                                  0, 0, 0, 0, 0x0013)
+            self._fg_at = time.perf_counter()
+
+        self._fg_at = 0.0
+        self._fg_proc = WINEVENTPROC(on_event)      # keep a reference: ctypes must not free it
+        try:
+            u = ctypes.windll.user32
+            u.SetWinEventHook.restype = wintypes.HANDLE
+            u.SetWinEventHook.argtypes = (wintypes.DWORD, wintypes.DWORD, wintypes.HMODULE, WINEVENTPROC,
+                                          wintypes.DWORD, wintypes.DWORD, wintypes.DWORD)
+            # EVENT_SYSTEM_FOREGROUND; WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
+            self._fg_hook = u.SetWinEventHook(0x0003, 0x0003, None, self._fg_proc, 0, 0, 0x0002)
+        except Exception:
+            self._fg_hook = None
+        self._zorder_watch()
+
+    def _zorder_watch(self):
+        """For half a second after another window came to the front, go back on
+        top every 50 ms: the taskbar can raise itself a moment after the event."""
+        if not self._dragging and time.perf_counter() - self._fg_at < 0.5:
+            self._assert_topmost()
+        self.root.after(50, self._zorder_watch)
 
     # ── events ────────────────────────────────────────────────────────────
     def _bind_events(self):
@@ -1101,7 +1203,7 @@ class UsageWidget:
         elapsed, label, _, _ = week_pace(pct, resets)
         lines = [f"Weekly limit {pct}%" + (f" · {label}" if label else "")]
         if resets:
-            lines.append(f"Resets in {format_left(resets)} ({resets:%a %H:%M})")
+            lines.append(f"Resets in {format_left(resets)} (after {reset_label(resets, '%a %H:%M')})")
             lines.append(f"{round(elapsed * 100)}% of the week gone · click for details")
         return lines
 
@@ -1125,6 +1227,7 @@ class UsageWidget:
     def _on_release(self, e):
         if self._dragging:
             self._save_pos()
+            self._tb_seen = None              # _follow_taskbar reads the color at the new place
         else:
             self.panel.toggle()
         self._press = None
@@ -1183,8 +1286,10 @@ class UsageWidget:
         if ev and ctypes.windll.kernel32.WaitForSingleObject(ev, 0) == 0:
             ctypes.windll.kernel32.ResetEvent(ev)
             self._show_front()                # another launch asked us to come forward
-        if self._frame % 3 == 0 and not self.panel.is_open:
-            self._assert_topmost()            # stay above the taskbar
+        if not self.panel.is_open:
+            self._assert_topmost()            # stay above the taskbar (backup for _hook_foreground)
+        if self._frame % 2 == 0:
+            self._follow_taskbar()            # match the taskbar's color as it changes
         if self._frame % 5 == 0:
             theme = (light_theme("AppsUseLightTheme"), light_theme("SystemUsesLightTheme"))
             if theme != self._theme:
@@ -1238,7 +1343,7 @@ class UsageWidget:
         num = f"{round(shown)}%"
         cv.create_text(tx, ty, text=num, font=f_b, anchor="w",
                        fill=c["crit"] if pct >= 90 else fg)
-        until = f"until {resets.strftime('%a')}" if resets else ""
+        until = f"until {reset_label(resets, '%a')}" if resets else ""
         cv.create_text(tx + f_b.measure(num) + px(6), ty, text=until, font=f, fill=sub, anchor="w")
 
         elapsed = week_pace(pct, resets)[0]
@@ -1267,9 +1372,22 @@ def main():
     except Exception:
         _show_event = None
 
-    w = UsageWidget()
-    w._show_event = _show_event
-    w.run()
+    # The taskbar owns the strip. When Explorer restarts, Windows destroys the
+    # strip together with the old taskbar: wait for the new taskbar and start again.
+    while True:
+        w = UsageWidget()
+        w._show_event = _show_event
+        try:
+            w.run()
+        except Exception:
+            pass
+        if getattr(w, "quitting", False):
+            break
+        for _ in range(60):
+            time.sleep(1)
+            if ctypes.windll.user32.FindWindowW("Shell_TrayWnd", None):
+                break
+        time.sleep(2)                         # let the new taskbar finish drawing
 
 
 if __name__ == "__main__":

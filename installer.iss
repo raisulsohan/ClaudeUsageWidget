@@ -54,6 +54,8 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#AppExe} /F"; Flags: runhidden
 
 [UninstallDelete]
 Type: files; Name: "{app}\usage_data.json"
+Type: files; Name: "{app}\usage_raw.json"
+Type: files; Name: "{app}\history.json"
 Type: files; Name: "{app}\fetch.log"
 
 [Messages]

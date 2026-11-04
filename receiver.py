@@ -22,6 +22,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import fetch_usage
+import usage_history
 
 # next to the .exe when built with PyInstaller, else next to this script
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
@@ -83,6 +84,7 @@ class Handler(BaseHTTPRequestHandler):
             RAW_FILE.write_text(json.dumps(body.get("usage") or {}, indent=2), encoding="utf-8")
             data = fetch_usage.parse(body.get("usage") or {}, body.get("org") or {})
             DATA_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            usage_history.record(data)      # the "by day" chart, also while the widget is closed
             REFRESH.clear()
             ts = datetime.now().strftime("%H:%M:%S")
             print(f"[{ts}] weekly={data['weekly']['percent']}%  "

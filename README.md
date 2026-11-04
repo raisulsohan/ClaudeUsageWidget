@@ -15,7 +15,7 @@ A Windows taskbar widget that shows your [claude.ai](https://claude.ai) plan lim
 A small strip sits on the taskbar: `51% until Tue`, with a bar. The mark on the bar shows how much of the week has gone, so you can see at a glance whether you are ahead of it. Click the strip to open the panel:
 
 - **Weekly limit**: the 7-day limit across all models, when it resets, and your pace — `On track`, `Tight` or `Over pace`, from the share of the week gone and the projected end-of-week usage
-- **This week by day**: a column for each day of the weekly window, with a dashed line at an even pace (~14% a day). The widget keeps its own history of your weekly % (`%LOCALAPPDATA%\claude-usage-widget\history.json`), so the chart fills in from the day you start it; a day it did not see shows `–`
+- **This week by day**: a column for each day of the weekly window, with a dashed line at an even pace (~14% a day). The receiver and the widget keep a history of your weekly % in `history.json` next to `usage_data.json`, so the chart fills in from the day you start them; a day they did not see shows `–`. (Older versions kept it in `%LOCALAPPDATA%\claude-usage-widget\`; it is merged in on start.)
 - **Today**: today's budget — the limit that is left, spread evenly over the days that are left — and how much of it you used today. The bar turns red when you go over
 - **This week by product**: how much of the weekly limit each product used. claude.ai reports each product's share of your usage; the panel shows that share of your weekly % (with 5% used and Claude Code at 100% of use, Claude Code shows 5%), and the share itself as a small note. Claude Code and Chats always show; Cowork and Other only once you use them
 - **Other limits**: the separate weekly Fable limit (only if your plan has one) and extra usage (only when it is on)
@@ -23,7 +23,7 @@ A small strip sits on the taskbar: `51% until Tue`, with a bar. The mark on the 
 
 Bars turn **red at 90%**.
 
-**Theme:** the panel follows the Windows light/dark setting. To choose yourself, click the theme button next to **Quit**: it goes round **Same as Windows** (half circle) → **Light** (sun) → **Dark** (moon). Your choice is kept in `%LOCALAPPDATA%\claude-usage-widget\settings.json`. The strip always takes the taskbar's color, so it blends in.
+**Theme:** the panel follows the Windows light/dark setting. To choose yourself, click the theme button next to **Quit**: it goes round **Same as Windows** (half circle) → **Light** (sun) → **Dark** (moon). Your choice is kept in `%LOCALAPPDATA%\claude-usage-widget\settings.json`. The strip always takes the taskbar's color, so it blends in. It reads the color again every 2 seconds, so it follows a new wallpaper, accent color or transparency setting.
 
 Hover the strip, the weekly bar, a day column or the Today row for a tooltip with the details. The panel slides in, its bars fill and its numbers count up; the strip moves smoothly to new data. Turn off **Settings › Accessibility › Visual effects › Animation effects** and the widget shows everything at once, without motion.
 
