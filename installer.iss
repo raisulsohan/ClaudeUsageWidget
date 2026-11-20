@@ -1,9 +1,9 @@
-; installer.iss - Inno Setup 6 script for Claude Usage Widget.
+﻿; installer.iss - Inno Setup 6 script for Claude Usage Widget.
 ; Build with build_installer.bat (it runs PyInstaller first, then this script).
 ; Installs per user (no admin prompt) to %LOCALAPPDATA%\Programs\Claude Usage Widget.
 
 #define AppName "Claude Usage Widget"
-#define AppVersion "2.0.2"
+#define AppVersion "2.0.6"
 #define AppExe "ClaudeUsageWidget.exe"
 
 [Setup]

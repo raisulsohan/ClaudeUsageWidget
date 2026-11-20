@@ -216,10 +216,17 @@ def week_days(pct, resets, hist):
         a = start + i * DAY
         b = a + DAY
         base = 0 if i == 0 else pct_at(a)            # the limit is 0% when the week starts
+        since = None
         if a > now:
             state, value = "future", None
         elif b > now:
             state = "today"
+            if base is None:
+                # no snapshot from before today (the widget was off, or its history
+                # was lost): count today from its first snapshot instead of nothing
+                first = next(((t, p) for t, p in pts if a <= t <= now), None)
+                if first:
+                    since, base = first
             value = None if base is None else max(0, pct - base)
         else:
             end = pct_at(b)
@@ -228,7 +235,7 @@ def week_days(pct, resets, hist):
         if value is None and state != "future":
             state = "nodata" if state == "past" else state
         days.append({"start": a, "label": (a + DAY / 2).strftime("%a"), "state": state,
-                     "value": value, "base": base})
+                     "value": value, "base": base, "since": since})
     return days
 
 
@@ -326,6 +333,15 @@ def mix(a, b, t):
     """Blend hex color a toward b by t."""
     ra, rb = hex_rgb(a), hex_rgb(b)
     return rgb_hex(tuple(ra[i] + (rb[i] - ra[i]) * t for i in range(3)))
+
+
+def hgrad_image(w, h, a, b):
+    """A w x h image that fades from hex color a (left) to b (right)."""
+    ra, rb = hex_rgb(a), hex_rgb(b)
+    row = Image.new("RGB", (w, 1))
+    row.putdata([tuple(round(ra[i] + (rb[i] - ra[i]) * x / max(1, w - 1)) for i in range(3))
+                 for x in range(w)])
+    return row.resize((w, h))
 
 
 def luminance(c):
@@ -720,7 +736,9 @@ class Panel:
                 a = dd["start"] + DAY / 2
                 date = f"{a:%a} {a.day} {a:%b}"
                 hover(tag, {
-                    "today":  ["Today", f"{v}% of the weekly limit so far" if v is not None else "No data yet"],
+                    "today":  ["Today", "No data yet" if v is None else
+                               f"{v}% of the weekly limit since {dd['since']:%H:%M}" if dd["since"] else
+                               f"{v}% of the weekly limit so far"],
                     "past":   [date, f"{v}% of the weekly limit"],
                     "nodata": [date, "No data: the widget was not running"],
                     "future": [date, "Still to come"],
@@ -729,24 +747,65 @@ class Panel:
             cv.create_line(pad, pace_y, right, pace_y, fill=c["dim"], dash=(2, 3))
             y = bottom + px(12) + px(34)
 
-            # today's budget: what is left, spread evenly over the days that are left
+            # today's budget rolls over: an even day's share plus what earlier days
+            # saved (or minus what they overspent). It equals the even pace at the
+            # end of today minus the use at the start of today, so it can go below 0.
             if today_i is not None and pct < 100:
                 td = days[today_i]
-                now = datetime.now().astimezone()
-                base = td["base"] if td["base"] is not None else pct
-                since = td["start"] if td["base"] is not None else now
-                left_days = max((resets - since) / DAY, 0.1)
-                budget = max((100 - base) / left_days, 0.1)
+                known = td["base"] is not None
+                base = td["base"] if known else pct     # no snapshot at day start: use now
+                target = (today_i + 1) * EVEN_DAY       # even pace at the end of today
+                budget = target - base
                 used = td["value"]
-                over = used is not None and used > budget
-                row("Today", min(100, used / budget * 100) if used is not None else 0,
+                spent = used or 0
+                over = spent > budget or budget <= 0
+                fmt = lambda v: f"{'−' if round(v) < 0 else ''}{abs(round(v))}%"
+                if budget > 0:
+                    bar = min(100, spent / budget * 100)
+                else:
+                    bar = 100
+                row("Today", bar,
                     f"{round(used * e)}%" if used is not None else "—",
-                    f"budget ~{budget:.0f}% a day", c["crit"] if over else None, "budget")
+                    f"budget {fmt(budget)}", c["crit"] if over else None, "budget")
+                # a second line, always shown: where the budget comes from (left)
+                # and what is left of it today (right). The carry is taken from the
+                # rounded numbers, so "14% − 1%" always adds up to the "13%" above.
+                even, shown = round(EVEN_DAY), round(budget)
+                carry = shown - even
+                if carry == 0:
+                    how = f"{even}% a day, nothing carried over"
+                elif carry > 0:
+                    how = f"{even}% + {carry}% saved earlier"
+                else:
+                    how = f"{even}% − {-carry}% overspent earlier"
+                left = budget - spent
+                since = td["since"]
+                if not known:
+                    rest, rest_col = "counted from now", c["dim"]
+                elif since and round(left) >= 0 and budget > 0:
+                    rest, rest_col = f"{round(left)}% left · from {since:%H:%M}", c["sub"]
+                elif budget <= 0:
+                    rest, rest_col = f"{abs(round(budget))}% behind pace", c["crit"]
+                elif round(left) < 0:
+                    rest, rest_col = f"{-round(left)}% over today", c["crit"]
+                else:
+                    rest, rest_col = f"{round(left)}% left today", c["sub"]
+                sub_y = y - px(10)
+                text(pad, sub_y, how, F["small"], c["dim"], tags="budget")
+                text(right, sub_y, rest, F["small"], rest_col, anchor="e", tags="budget")
+                y += px(12)
+                carry_line = how[0].upper() + how[1:] + "."
+                if budget <= 0:
+                    tail = f"You are {-budget:.0f}% behind the even pace. Use less to catch up."
+                elif left < 0:
+                    tail = f"Over budget by {-left:.0f}%. Tomorrow's budget gets smaller."
+                else:
+                    tail = f"{left:.0f}% left today. What you save moves to tomorrow."
                 hover("budget", [
-                    f"Today's budget: ~{budget:.0f}% of the limit",
-                    f"{100 - base}% is left for {left_days:.1f} days.",
-                    "Over budget today" if over else "Stay under it and the limit lasts the week.",
-                ])
+                    f"Today's budget: {fmt(budget)} of the limit",
+                    carry_line,
+                    tail if known else "No data from the start of today: budget counts from now.",
+                ] + ([f"No data before {since:%H:%M} today: counted from then."] if since else []))
             y += px(8)
 
         # The API gives each product's share of this week's usage. Show how much of
@@ -987,6 +1046,7 @@ class UsageWidget:
             x, y = saved                      # reopen where you left it
         x, y = self._clamp(x, y)
         self.tb_bg = self._sample_taskbar(x, y)
+        self.tb_grad = (self.tb_bg, self.tb_bg)
         r.configure(bg=self.tb_bg)
         r.geometry(f"{self.W}x{self.H}+{x}+{y}")
         r.update_idletasks()
@@ -1004,14 +1064,19 @@ class UsageWidget:
 
     def _sample_beside(self):
         """The taskbar's color in thin columns just left and right of the strip,
-        read without hiding the strip. None when the two sides do not agree
-        (an icon, a full-screen app or anything else that is not plain taskbar)."""
+        read without hiding the strip, as (left, right). A side that is not plain
+        taskbar (an icon, a full-screen app ...) is left out; with only one plain
+        side, that color is used for both. None when no side is plain.
+        With transparency on, the taskbar shows the wallpaper through it, so its
+        color changes along the bar: the two sides may differ, and the strip
+        fades from one to the other."""
         x, y, W, H = self.root.winfo_x(), self.root.winfo_y(), self.W, self.H
         gap, cw = self.px(3), self.px(8)
         sw = self.root.winfo_screenwidth()
         sides = []
         for left in (x - gap - cw, x + W + gap):
             if left < 0 or left + cw > sw:
+                sides.append(None)
                 continue
             try:
                 img = ImageGrab.grab(bbox=(left, y + 2, left + cw, y + H - 2)).convert("RGB")
@@ -1024,12 +1089,14 @@ class UsageWidget:
             med = tuple(sorted(p[i] for p in px_)[len(px_) // 2] for i in range(3))
             near = [p for p in px_ if sum(abs(p[i] - med[i]) for i in range(3)) <= 12]
             if len(near) >= len(px_) * 0.8:
-                sides.append(tuple(round(sum(p[i] for p in near) / len(near)) for i in range(3)))
-        if not sides:
+                sides.append(rgb_hex(tuple(round(sum(p[i] for p in near) / len(near))
+                                           for i in range(3))))
+            else:
+                sides.append(None)
+        lc, rc = sides
+        if not lc and not rc:
             return None
-        if len(sides) == 2 and sum(abs(a - b) for a, b in zip(*sides)) > 12:
-            return None
-        return rgb_hex(sides[0])
+        return (lc or rc, rc or lc)
 
     def _follow_taskbar(self):
         """Keep the strip the same color as the taskbar. The taskbar color
@@ -1039,19 +1106,24 @@ class UsageWidget:
         if self._dragging:
             return
         def far(a, b, limit=4):              # ignore the grain's small changes
-            return b is None or sum(abs(p - q) for p, q in zip(hex_rgb(a), hex_rgb(b))) > limit
+            return b is None or any(sum(abs(p - q) for p, q in zip(hex_rgb(u), hex_rgb(v))) > limit
+                                    for u, v in zip(a, b))
 
-        col = self._sample_beside()
-        if not col or not far(col, self.tb_bg):
+        cols = self._sample_beside()
+        if not cols or not far(cols, self.tb_grad):
             self._tb_seen = None
             return
-        if far(col, getattr(self, "_tb_seen", None)):
-            self._tb_seen = col
+        if far(cols, getattr(self, "_tb_seen", None)):
+            self._tb_seen = cols
             return
         self._tb_seen = None
-        self.tb_bg = col
-        self.root.configure(bg=col)
-        self.canvas.configure(bg=col)
+        self._set_taskbar_color(cols)
+
+    def _set_taskbar_color(self, cols):
+        self.tb_grad = cols
+        self.tb_bg = mix(cols[0], cols[1], 0.5)
+        self.root.configure(bg=self.tb_bg)
+        self.canvas.configure(bg=self.tb_bg)
         self._redraw_strip()
 
     def _resample(self):
@@ -1059,9 +1131,14 @@ class UsageWidget:
         r = self.root
         r.withdraw()
         r.update()
-        r.after(150, lambda: (setattr(self, "tb_bg", self._sample_taskbar(r.winfo_x(), r.winfo_y())),
-                              r.configure(bg=self.tb_bg), self.canvas.configure(bg=self.tb_bg),
-                              r.deiconify(), self.redraw()))
+        def back():
+            c = self._sample_taskbar(r.winfo_x(), r.winfo_y())
+            self.tb_bg, self.tb_grad = c, (c, c)
+            r.configure(bg=c)
+            self.canvas.configure(bg=c)
+            r.deiconify()
+            self.redraw()
+        r.after(150, back)
 
     def _clamp(self, x, y):
         """Keep the strip on-screen and clear of the clock / tray."""
@@ -1332,6 +1409,10 @@ class UsageWidget:
             ph = ImageTk.PhotoImage(pil)
             self._imgs.append(ph)
             cv.create_image(x, y, image=ph, anchor=anchor)
+
+        lc, rc = self.tb_grad
+        if lc != rc:                           # the taskbar's color changes along the bar
+            image(0, 0, hgrad_image(W, H, lc, rc), anchor="nw")
 
         if self._hover or self.panel.is_open:  # like a taskbar button's hover
             image(px(2), H // 2, rrect_image(W - px(4), H - px(8), px(5),
